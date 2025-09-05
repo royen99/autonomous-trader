@@ -1,0 +1,71 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DB:-trader}
+      POSTGRES_USER: ${PG_USER:-trader}
+      POSTGRES_PASSWORD: ${PG_PASS:-traderpass}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db_init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5432:5432"
+
+  # (Optional) Ollama if you don’t have a remote one
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ollama:/root/.ollama
+  #   ports:
+  #     - "11434:11434"
+
+  trader:
+    build: ./trader
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      # ollama:
+      #   condition: service_started
+    environment:
+      - LOG_LEVEL=INFO
+    command: ["python", "-u", "main.py"]
+
+  dashboard:
+    build: ./dashboard
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8082:8080"
+
+  # Optional helper UI
+  pgadmin:
+    image: dpage/pgadmin4:8.13
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    volumes:
+      - ./pgadmin_servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8081:80"
+
+volumes:
+  pgdata:
+  # ollama:

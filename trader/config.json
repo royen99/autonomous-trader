@@ -1,0 +1,41 @@
+{
+  "symbols": ["CROUSDT", "SUIUSDT", "BCHUSDT", "LTCUSDT", "XRPUSDT"],
+  "interval": "1m",
+  "klines_limit": 300,
+  "exchange": {
+    "name": "mexc",
+    "base_url": "https://api.mexc.com",
+    "api_key_header": "X-MEXC-APIKEY",
+    "endpoints": {
+      "klines": "/api/v3/klines",
+      "account": "/api/v3/account",
+      "order": "/api/v3/order",
+      "exchangeInfo": "/api/v3/exchangeInfo",
+      "openOrders": "/api/v3/openOrders",
+      "orderQuery": "/api/v3/order"
+    },
+    "recvWindow": 5000
+  },
+  "risk": {
+    "max_position_usd": 1500,
+    "max_per_trade_usd": 200,
+    "daily_max_loss_usd": 250,
+    "cooldown_after_loss_s": 300,
+    "min_confidence": 0.51,
+    "stop_loss_pct": 0.01,
+    "take_profit_pct": 0.01
+  },
+  "execution": {
+    "slippage_bps": 4,
+    "round_price_dp": 2,
+    "round_qty_dp": 6,
+    "time_in_force": "GTC"
+  },
+  "agent": {
+    "history_bars": 200,
+    "feature_set": ["returns", "rsi", "macd", "volatility"]
+  },
+  "paper": {
+    "starting_usdt": 10000
+  }
+}

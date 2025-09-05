@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Autonomous Trader · Dashboard</title>
+
+  <!-- Tailwind (CDN) with brand color -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            orange: {
+              500: '#ff6200',
+              600: '#ff4d00'
+            }
+          },
+          boxShadow: {
+            glow: '0 0 30px rgba(255,98,0,0.35)',
+          }
+        }
+      }
+    };
+    // honor system theme by default
+    document.documentElement.classList.toggle(
+      "dark",
+      localStorage.theme === "dark" ||
+      (!("theme" in localStorage) && window.matchMedia("(prefers-color-scheme: dark)").matches),
+    );
+  </script>
+
+    <!-- Chart.js UMD (auto-registers core bits) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <!-- Date adapter -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+    <!-- Financial plugin (pin to 0.2.1) -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
+
+    <script>
+    // auto bundle already covers registerables; still need financial:
+    (function () {
+        const fin = window['chartjs-chart-financial'];
+        if (!fin) return;
+        const { CandlestickController, CandlestickElement, OhlcController, OhlcElement } = fin;
+        Chart.register(CandlestickController, CandlestickElement, OhlcController, OhlcElement);
+    })();
+    </script>
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🟧</text></svg>">
+</head>
+<body class="bg-neutral-950 text-neutral-100 min-h-screen">
+  <header class="sticky top-0 z-10 backdrop-blur bg-neutral-900/70 border-b border-neutral-800">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="h-8 w-8 rounded bg-orange-500 shadow-glow"></div>
+        <h1 class="text-xl font-semibold">Autonomous Trader · Live Dashboard</h1>
+      </div>
+      <div class="flex items-center gap-3">
+        <select id="symbolSelect" class="bg-neutral-800 border border-neutral-700 rounded px-3 py-1">
+          <option>Loading…</option>
+        </select>
+        <button id="themeBtn" class="px-3 py-1 rounded border border-neutral-600 hover:bg-neutral-800">
+          <span id="themeLbl">Dark</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto p-4">
+    <!-- KPI cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+      <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900 shadow-glow">
+        <div class="text-sm text-neutral-400">USDT Balance</div>
+        <div id="usdtBal" class="text-2xl font-bold mt-1">—</div>
+        <div id="usdtDelta" class="text-sm mt-1">24h: —</div>
+      </div>
+      <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900">
+        <div class="text-sm text-neutral-400">Open Orders</div>
+        <div id="openOrders" class="text-2xl font-bold mt-1">—</div>
+      </div>
+      <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900">
+        <div class="text-sm text-neutral-400">Last Trade</div>
+        <div id="lastTrade" class="text-sm mt-1">—</div>
+      </div>
+      <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900">
+        <div class="text-sm text-neutral-400">Status</div>
+        <div id="statusDot" class="mt-2 inline-flex items-center gap-2">
+          <span class="h-2.5 w-2.5 rounded-full bg-neutral-600" id="wsDot"></span>
+          <span id="wsText" class="text-sm">Connecting…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900 mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-sm text-neutral-400">Candles</div>
+        <div class="text-sm" id="chartTitle">—</div>
+      </div>
+      <canvas id="kline" height="260"></canvas>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <!-- Orders -->
+      <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-sm text-neutral-400">Recent Orders</div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="text-neutral-400 border-b border-neutral-800">
+              <tr>
+                <th class="text-left py-2">Time</th>
+                <th class="text-left">Symbol</th>
+                <th class="text-left">Side</th>
+                <th class="text-right">Qty</th>
+                <th class="text-right">Price</th>
+                <th class="text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody id="ordersTbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- Trades -->
+      <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-sm text-neutral-400">Recent Trades</div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="text-neutral-400 border-b border-neutral-800">
+              <tr>
+                <th class="text-left py-2">Time</th>
+                <th class="text-left">Symbol</th>
+                <th class="text-left">Side</th>
+                <th class="text-right">Qty</th>
+                <th class="text-right">Price</th>
+                <th class="text-right">Fee</th>
+              </tr>
+            </thead>
+            <tbody id="tradesTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/dashboard.js"></script>
+  <script>
+    // theme toggle
+    const btn = document.getElementById('themeBtn');
+    btn.onclick = () => {
+      const dark = document.documentElement.classList.toggle('dark');
+      localStorage.theme = dark ? 'dark' : 'light';
+      document.getElementById('themeLbl').textContent = dark ? 'Dark' : 'Light';
+    };
+  </script>
+</body>
+</html>

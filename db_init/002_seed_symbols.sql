@@ -1,0 +1,4 @@
+INSERT INTO symbols(symbol) VALUES
+  ('CROUSDT'),
+  ('SUIUSDT')
+ON CONFLICT (symbol) DO NOTHING;

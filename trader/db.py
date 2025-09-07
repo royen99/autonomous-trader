@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, datetime as dt
-from typing import Optional, Iterable, List, Dict, Any
+from typing import Optional, Iterable, List, Dict, Any, Tuple
 from sqlalchemy import (
     MetaData, String, Integer, BigInteger, Float, Boolean,
     DateTime, ForeignKey, UniqueConstraint, Index, text
@@ -88,6 +88,16 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+async def set_order_exch_id(session, client_id: str, exch_order_id: str):
+    await session.execute(
+        text("""
+            UPDATE orders
+               SET exch_order_id = :oid,
+                   updated_at = NOW() AT TIME ZONE 'utc'
+             WHERE client_order_id = :cid
+        """).bindparams(oid=exch_order_id, cid=client_id)
+    )
+
 # --- DAL helpers ---
 async def upsert_candles(session: AsyncSession, symbol: str, rows):
     if not rows:
@@ -138,3 +148,65 @@ async def set_order_status(session: AsyncSession, client_id: str, status: str, p
 async def insert_trade(session: AsyncSession, **kwargs):
     t = Trade(**kwargs)
     session.add(t)
+
+async def fetch_open_orders(session: AsyncSession, limit: int = 200):
+    r = await session.execute(text("""
+        SELECT symbol, side, type, price, qty, status, client_order_id, exch_order_id
+        FROM orders
+        WHERE status IN ('NEW','PARTIALLY_FILLED')
+        ORDER BY created_at ASC
+        LIMIT :lim
+    """).bindparams(lim=limit))
+    cols = r.keys()
+    return [dict(zip(cols, row)) for row in r.fetchall()]
+
+async def set_order_exch_id(session: AsyncSession, client_id: str, exch_order_id: str):
+    await session.execute(
+        text("""
+            UPDATE orders
+               SET exch_order_id = :oid, updated_at = NOW() AT TIME ZONE 'utc'
+             WHERE client_order_id = :cid
+        """).bindparams(oid=exch_order_id, cid=client_id)
+    )
+
+async def load_trades_fifo_rows(session: AsyncSession, symbol: str) -> List[Dict[str, Any]]:
+    r = await session.execute(text("""
+        SELECT side, price, qty, ts
+        FROM trades
+        WHERE symbol = :s
+        ORDER BY ts ASC, id ASC
+    """).bindparams(s=symbol))
+    cols = r.keys()
+    return [dict(zip(cols, row)) for row in r.fetchall()]
+
+def fifo_position(rows: List[Dict[str, Any]]) -> Tuple[float, float, Optional[dt.datetime]]:
+    """
+    Consume BUY lots with SELLs. Return (qty_open, avg_entry_open, earliest_open_ts or None).
+    """
+    lots: List[Dict[str, Any]] = []
+    for t in rows:
+        side = (t["side"] or "").upper()
+        qty  = float(t["qty"] or 0.0)
+        px   = float(t["price"] or 0.0)
+        ts   = t["ts"]
+        if side == "BUY":
+            lots.append({"qty": qty, "price": px, "ts": ts})
+        elif side == "SELL":
+            remaining = qty
+            while remaining > 1e-18 and lots:
+                take = min(lots[0]["qty"], remaining)
+                lots[0]["qty"] -= take
+                remaining -= take
+                if lots[0]["qty"] <= 1e-18:
+                    lots.pop(0)
+            # if remaining > 0 beyond lots, shorting not supported: ignore
+    qty_open = sum(l["qty"] for l in lots)
+    if qty_open <= 1e-18:
+        return 0.0, 0.0, None
+    vwap = sum(l["qty"] * l["price"] for l in lots) / qty_open
+    first_ts = lots[0]["ts"]
+    return qty_open, vwap, first_ts
+
+async def get_open_position(session: AsyncSession, symbol: str) -> Tuple[float, float, Optional[dt.datetime]]:
+    rows = await load_trades_fifo_rows(session, symbol)
+    return fifo_position(rows)

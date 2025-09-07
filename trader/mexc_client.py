@@ -74,3 +74,15 @@ class MexcClient:
         if order_id: params["orderId"] = order_id
         if client_order_id: params["origClientOrderId"] = client_order_id
         return await self._signed("GET", path, params)
+
+    async def open_orders(self, path: str, symbol: str | None = None):
+        params = {}
+        if symbol:
+            params["symbol"] = symbol
+        return await self._signed("GET", path, params)
+
+    async def my_trades(self, path: str, symbol: str, limit: int = 50, order_id: str | None = None):
+        params = {"symbol": symbol, "limit": limit}
+        if order_id:
+            params["orderId"] = order_id
+        return await self._signed("GET", path, params)

@@ -19,10 +19,15 @@ def allow_trade(decision_conf: float, price: float, cfg: Dict[str, Any], rs: Ris
         return False
     return True
 
-def size_for_trade(price: float, cfg: Dict[str, Any], rs: RiskState) -> float:
-    max_per = cfg["risk"]["max_per_trade_usd"]
-    qty = max_per / price
-    return qty
+def size_for_trade(price: float, cfg: Dict[str, Any], rs: RiskState | None = None, available_quote: float | None = None) -> float:
+    """Return qty using min(max_per_trade_usd, available_quote or paper_usdt)."""
+    max_per = float(cfg["risk"]["max_per_trade_usd"])
+    if available_quote is None:
+        available_quote = float(getattr(rs, "usdt_balance", 0.0)) if rs else max_per
+    budget = min(max_per, float(available_quote))
+    if budget <= 0 or price <= 0:
+        return 0.0
+    return budget / price
 
 def update_loss(rs: RiskState, delta: float):
     rs.today_loss += delta

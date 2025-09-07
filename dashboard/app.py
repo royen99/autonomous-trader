@@ -1,7 +1,7 @@
 from __future__ import annotations
 import asyncio, os, datetime as dt
 from typing import Any, Dict, List, Optional
-
+from collections import defaultdict
 import orjson
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -118,6 +118,59 @@ async def get_summary(session: AsyncSession) -> Dict[str, Any]:
         "last_trade": last_trade
     }
 
+async def get_last_prices(session: AsyncSession) -> Dict[str, float]:
+    rows = await q_all(session, """
+      SELECT DISTINCT ON (symbol) symbol, close
+      FROM candles
+      ORDER BY symbol, ts DESC
+    """)
+    return {r["symbol"]: float(r["close"]) for r in rows}
+
+async def get_positions(session: AsyncSession):
+    # Pull all trades ordered by time (and id for tie-breaks)
+    trades = await q_all(session, """
+      SELECT symbol, side, price, qty, ts, id
+      FROM trades
+      ORDER BY symbol ASC, ts ASC, id ASC
+    """)
+    last_px = await get_last_prices(session)
+
+    lots = defaultdict(list)  # symbol -> list of open BUY lots [{qty, price, ts}]
+    for t in trades:
+        sym = t["symbol"]
+        side = (t["side"] or "").upper()
+        qty = float(t["qty"] or 0.0)
+        px  = float(t["price"] or 0.0)
+        ts  = t["ts"]
+        if side == "BUY":
+            lots[sym].append({"qty": qty, "price": px, "ts": ts})
+        elif side == "SELL":
+            remaining = qty
+            while remaining > 1e-18 and lots[sym]:
+                take = min(lots[sym][0]["qty"], remaining)
+                lots[sym][0]["qty"] -= take
+                remaining -= take
+                if lots[sym][0]["qty"] <= 1e-18:
+                    lots[sym].pop(0)
+
+    positions = []
+    for sym, open_lots in lots.items():
+        qty_open = sum(l["qty"] for l in open_lots)
+        if qty_open <= 1e-18:
+            continue
+        vwap = sum(l["qty"] * l["price"] for l in open_lots) / qty_open
+        last = float(last_px.get(sym, vwap))
+        upnl_pct = (last / vwap - 1.0) if vwap > 0 else 0.0
+        positions.append({
+            "symbol": sym,
+            "qty": qty_open,
+            "avg_entry": vwap,
+            "upnl_pct": upnl_pct
+        })
+
+    positions.sort(key=lambda r: r["symbol"])
+    return positions
+
 # ---------- Routes ----------
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -129,7 +182,7 @@ async def api_symbols():
         return oj(await get_symbols(s))
 
 @app.get("/api/candles")
-async def api_candles(symbol: str = Query(...), limit: int = Query(300, ge=10, le=1000)):
+async def api_candles(symbol: str = Query(...), limit: int = Query(180, ge=10, le=1000)):
     async with SessionLocal() as s:
         return oj(await get_candles(s, symbol, limit))
 
@@ -147,6 +200,11 @@ async def api_trades(limit: int = Query(50, ge=1, le=200)):
 async def api_summary():
     async with SessionLocal() as s:
         return oj(await get_summary(s))
+
+@app.get("/api/positions")
+async def api_positions():
+    async with SessionLocal() as s:
+        return oj(await get_positions(s))
 
 # ---------- WebSocket: pushes periodic updates ----------
 @app.websocket("/ws")
@@ -176,8 +234,9 @@ async def ws_feed(ws: WebSocket):
                     "symbol": symbol,
                     "summary": await get_summary(s),
                     "orders": await get_orders(s, limit=20),
-                    "trades": await get_trades(s, limit=40),
-                    "candles": await get_candles(s, symbol, limit=300),
+                    "trades": await get_trades(s, limit=20),
+                    "candles": await get_candles(s, symbol, limit=180),
+                    "positions": await get_positions(s),
                 }
             await ws.send_text(orjson.dumps(payload).decode())
             await asyncio.sleep(2.0)

@@ -70,34 +70,85 @@ function renderTrades(rows) {
   `).join('');
 }
 
+function renderPositions(rows) {
+  const tb = el('positionsTbody');
+  tb.innerHTML = (rows || []).map(r => {
+    const pct = (r.upnl_pct || 0) * 100;
+    const color = pct >= 0 ? 'text-green-400' : 'text-red-400';
+    const sign = pct >= 0 ? '+' : '';
+    return `
+      <tr class="border-b border-neutral-800/60">
+        <td class="py-2">${r.symbol}</td>
+        <td class="text-right">${fmt.format(r.qty)}</td>
+        <td class="text-right">${fmt.format(r.avg_entry)}</td>
+        <td class="text-right ${color}">${sign}${fmt2.format(pct)}%</td>
+      </tr>
+    `;
+  }).join('');
+}
+
 function initChart() {
-  const ctx = el('kline').getContext('2d');
+  const canvas = el('kline');
+  if (!canvas) { console.warn('kline <canvas id="kline"> not found'); return; }
+  const ctx = canvas.getContext('2d');
+
+  canvas.style.width = '100%';
+  canvas.height = 512;
+
   if (chart) chart.destroy();
   chart = new Chart(ctx, {
     type: 'candlestick',
-    data: {
-      datasets: [{
-        type: 'candlestick',
-        label: 'Price',
-        data: [],
-        // make it pop on dark background
-        upColor: 'rgba(34,197,94,1)',         // green-500
-        downColor: 'rgba(239,68,68,1)',       // red-500
-        borderUpColor: 'rgba(34,197,94,1)',
-        borderDownColor: 'rgba(239,68,68,1)',
-        wickColor: 'rgba(229,231,235,0.7)'    // neutral-200-ish
-      }]
-    },
+    data: { datasets: [{
+      type: 'candlestick',
+      label: 'Price',
+      data: [],
+      upColor: 'rgba(34,197,94,1)',
+      downColor: 'rgba(239,68,68,1)',
+      borderUpColor: 'rgba(34,197,94,1)',
+      borderDownColor: 'rgba(239,68,68,1)',
+      wickColor: 'rgba(229,231,235,0.7)'
+    }]},
     options: {
-      // IMPORTANT: let the plugin parse {x,o,h,l,c}
-      // (default is true, so you can omit this line entirely)
       parsing: true,
       animation: false,
       interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { display: false }, tooltip: { enabled: true } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          callbacks: {
+            title(items) {
+              // show time from x
+              const r = items[0]?.raw;
+              return r?.x ? new Date(r.x).toLocaleString() : '';
+            },
+            label(ctx) {
+              const r = ctx.raw || {};
+              const o = r.o, h = r.h, l = r.l, c = r.c;
+              // guard against undefined
+              if (o == null || h == null || l == null || c == null) return '';
+              return `O: ${fmt.format(o)}  H: ${fmt.format(h)}  L: ${fmt.format(l)}  C: ${fmt.format(c)}`;
+            }
+          }
+        }
+      },
       scales: {
         x: { type: 'time', time: { tooltipFormat: 'yyyy-MM-dd HH:mm' } },
-        y: { type: 'linear', beginAtZero: false, ticks: { callback: (v) => fmt.format(v) } }
+        y: {
+            type: 'linear',
+            beginAtZero: false,
+            ticks: {
+                color: 'rgba(229,231,235,0.7)',
+                callback: (v) => fmt.format(v)
+            },
+            grid: {
+                display: true,
+                color: 'rgba(255,255,255,0.06)',
+                borderColor: 'rgba(255,255,255,0.12)',
+                drawTicks: false,
+                lineWidth: 1
+            }
+        }
       }
     }
   });
@@ -151,6 +202,7 @@ function wsConnect(symbol) {
         renderOrders(msg.orders);
         renderTrades(msg.trades);
         updateChart(msg.symbol, msg.candles);
+        if (msg.positions) renderPositions(msg.positions);
       } else if (msg.type === 'error') {
         el('wsText').textContent = 'Error';
         el('wsDot').className = 'h-2.5 w-2.5 rounded-full bg-red-500';
@@ -177,15 +229,17 @@ async function boot() {
   const symbol = symbols[0] || 'BTCUSDT';
 
   // initial REST load (so UI fills instantly)
-  const [summary, candles, orders, trades] = await Promise.all([
+  const [summary, candles, orders, trades, positions] = await Promise.all([
     fetchJSON('/api/summary').catch(() => ({})),
-    fetchJSON(`/api/candles?symbol=${encodeURIComponent(symbol)}&limit=300`).catch(() => []),
+    fetchJSON(`/api/candles?symbol=${encodeURIComponent(symbol)}&limit=180`).catch(() => []),
     fetchJSON('/api/orders?limit=20').catch(() => []),
-    fetchJSON('/api/trades?limit=40').catch(() => []),
+    fetchJSON('/api/trades?limit=20').catch(() => []),
+    fetchJSON('/api/positions').catch(() => []),
   ]);
   upKpis(summary);
   renderOrders(orders);
   renderTrades(trades);
+  renderPositions(positions);
   updateChart(symbol, candles);
 
   wsConnect(symbol);
@@ -193,7 +247,7 @@ async function boot() {
   sel.onchange = async (e) => {
     const sym = e.target.value;
     // refresh chart immediately
-    const nc = await fetchJSON(`/api/candles?symbol=${encodeURIComponent(sym)}&limit=300`).catch(() => []);
+    const nc = await fetchJSON(`/api/candles?symbol=${encodeURIComponent(sym)}&limit=180`).catch(() => []);
     updateChart(sym, nc);
     // reconnect ws for new symbol
     try { ws && ws.close(); } catch {}
@@ -201,4 +255,4 @@ async function boot() {
   };
 }
 
-boot();
+document.addEventListener('DOMContentLoaded', boot);

@@ -1,5 +1,5 @@
 {
-  "symbols": ["CROUSDT", "SUIUSDT", "BCHUSDT", "LTCUSDT", "XRPUSDT"],
+  "symbols": ["SOLUSDT", "SUIUSDT", "BCHUSDT", "LTCUSDT", "XRPUSDT"],
   "interval": "1m",
   "klines_limit": 600,
   "exchange": {
@@ -18,7 +18,7 @@
   },
   "risk": {
     "max_position_usd": 1500,
-    "max_per_trade_usd": 200,
+    "max_per_trade_usd": 10,
     "daily_max_loss_usd": 250,
     "cooldown_after_loss_s": 300,
     "min_confidence": 0.55,
@@ -27,9 +27,14 @@
   },
   "execution": {
     "slippage_bps": 4,
-    "round_price_dp": 2,
+    "round_price_dp": 4,
     "round_qty_dp": 6,
-    "time_in_force": "GTC"
+    "time_in_force": "GTC",
+    "min_notional_usd": 1,
+    "fee_bps": 5,
+    "time_stop_min": 90,
+    "min_profit_bps": 5,
+    "dca_step_bps": 20
   },
   "agent": {
     "history_bars": 200,

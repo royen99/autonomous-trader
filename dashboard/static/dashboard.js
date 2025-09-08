@@ -23,6 +23,9 @@ function upKpis(summary) {
     const sign = d > 0 ? '+' : '';
     el('usdtDelta').innerHTML = `24h: <span class="${d >= 0 ? 'text-green-400' : 'text-red-400'}">${sign}${fmt2.format(d)}</span>`;
   }
+  if (summary.positions_value_usdt != null) {
+    el('posValue').textContent = `USDT ${fmt2.format(summary.positions_value_usdt)}`;
+  }
   el('openOrders').textContent = summary.open_orders ?? '0';
   el('lastTrade').textContent = summary.last_trade || '—';
 }

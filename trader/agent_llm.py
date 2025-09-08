@@ -111,7 +111,7 @@ async def llm_decide(
         position_json=position_json,
         dca_step_bps=dca_step_bps
     )
-    payload = {"model": model, "prompt": prompt, "stream": False, "format": "json", "options": {"temperature": 0.35}}
+    payload = {"model": model, "prompt": prompt, "stream": False, "format": "json", "options": {"temperature": 0.2, "seed": 42}}
 
     try:
         out = await _call_ollama(ollama_host, payload)

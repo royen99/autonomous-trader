@@ -1,5 +1,5 @@
 {
-  "symbols": ["SOLUSDT", "SUIUSDT", "BCHUSDT", "LTCUSDT", "XRPUSDT"],
+  "symbols": ["SOLUSDT", "SUIUSDT", "BCHUSDT", "LTCUSDT", "XRPUSDT", "AVAXUSDT"],
   "interval": "1m",
   "klines_limit": 600,
   "exchange": {

@@ -99,10 +99,14 @@ async def run_symbol(sym: str):
                     age_min = 0.0
                     stop_ok = False
 
+                notional_cur = (pos_qty or 0.0) * px
+                is_dust = notional_cur < 1.0 or (pos_qty or 0.0) <= 0 or not avg_entry
+
+                # Set avg_entry and breakeven_px to None if position value has less then 1 USDT
                 pos_ctx = {
                     "qty": float(pos_qty or 0.0),
-                    "avg_entry": float(avg_entry or 0.0) if avg_entry else None,
-                    "breakeven_px": float(breakeven_px) if breakeven_px else None,
+                    "avg_entry": None if is_dust else float(avg_entry),
+                    "breakeven_px": None if (is_dust or not breakeven_px) else float(breakeven_px),
                     "unrealized_pct": float(upnl_pct),
                     "in_position_min": int(age_min),
                     "stop_ok": bool(stop_ok)
@@ -115,10 +119,12 @@ async def run_symbol(sym: str):
                 # 3) Heartbeat log ALWAYS
                 if decision.action == "HOLD":
                     action_emoji = "🔄"
-                elif decision.action == "SELL" and pos_qty == 0:
-                    action_emoji = "❌"
+                elif decision.action == "SELL" and pos_qty > 0:
+                    action_emoji = "🔴"
                 elif decision.action == "BUY":
-                    action_emoji = "➕"
+                    action_emoji = "🟢"
+                else:
+                    action_emoji = "❓"
                 logging.info("[%s] %s %s price=%.6f conf=%.2f last_ts=%s reason=%s",
                              sym, action_emoji, decision.action, price, decision.confidence, last_ts, decision.reason)
 
@@ -200,8 +206,12 @@ async def run_symbol(sym: str):
                         await asyncio.sleep(HEARTBEAT)
                         continue
 
-                    if (pos_qty or 0.0) > 0 and (avg_entry or 0.0) > 0:
-                        dca_thresh = (avg_entry) * (1.0 - dca_step_bps / 10000.0)
+                    min_pos_usdt  = float(CFG["execution"].get("min_notional_usd", 1.0))
+                    pos_notional  = (pos_qty or 0.0) * price
+                    is_dust_pos   = ((pos_qty or 0.0) <= 0.0) or (not avg_entry) or (pos_notional < min_pos_usdt)
+
+                    if not is_dust_pos and (pos_qty or 0.0) > 0.0 and (avg_entry or 0.0) > 0.0:
+                        dca_thresh = avg_entry * (1.0 - dca_step_bps / 10000.0)
                         if price > dca_thresh:
                             logging.info("[%s] SKIP BUY: DCA rule (spot=%.6f > thresh=%.6f, avg=%.6f, step=%sbps)",
                                         sym, price, dca_thresh, avg_entry, dca_step_bps)

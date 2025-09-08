@@ -110,12 +110,18 @@ async def get_summary(session: AsyncSession) -> Dict[str, Any]:
         r = lt[0]
         last_trade = f"{r['ts'].isoformat()} · {r['symbol']} {r['side']} {r['qty']:.6f} @ {r['price']:.6f}"
 
+    # value of all positions (unrealized PnL not included)
+    pos_list = await get_positions(session)
+    positions_value_usdt = sum((p["qty"] or 0.0) * float(p.get("last") or p["avg_entry"] or 0.0)
+                               for p in pos_list)
+
     return {
         "usdt": usdt,
         "usdt_ts": last_ts,
         "delta_24h": delta_24,
         "open_orders": int(open_orders),
-        "last_trade": last_trade
+        "last_trade": last_trade,
+        "positions_value_usdt": positions_value_usdt
     }
 
 async def get_last_prices(session: AsyncSession) -> Dict[str, float]:
@@ -165,7 +171,8 @@ async def get_positions(session: AsyncSession):
             "symbol": sym,
             "qty": qty_open,
             "avg_entry": vwap,
-            "upnl_pct": upnl_pct
+            "upnl_pct": upnl_pct,
+            "last": last,
         })
 
     positions.sort(key=lambda r: r["symbol"])

@@ -1,7 +1,7 @@
 {
   "symbols": ["SOLUSDT", "SUIUSDT", "BCHUSDT", "LTCUSDT", "XRPUSDT", "AVAXUSDT"],
   "interval": "1m",
-  "klines_limit": 600,
+  "klines_limit": 300,
   "exchange": {
     "name": "mexc",
     "base_url": "https://api.mexc.com",
@@ -32,9 +32,9 @@
     "time_in_force": "GTC",
     "min_notional_usd": 1,
     "fee_bps": 5,
-    "time_stop_min": 90,
-    "min_profit_bps": 5,
-    "dca_step_bps": 20
+    "min_profit_bps": 10,
+    "dca_step_bps": 20,
+    "time_stop_min": 90
   },
   "agent": {
     "history_bars": 200,
@@ -42,5 +42,10 @@
   },
   "paper": {
     "starting_usdt": 10000
+  },
+  "profit_protect": {
+    "arm_upnl_pct": 0.025,
+    "trail_drawdown_pct": 0.012,
+    "min_hold_min": 2
   }
 }

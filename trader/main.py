@@ -49,6 +49,37 @@ async def persist_candles(sym, df, session):
 async def paper_fill(side: str, price: float, qty: float) -> dict:
     return {"status": "FILLED", "price": price, "executedQty": qty}
 
+def build_pos_ctx(price: float, qty: float, avg_entry: float | None,
+                  fee_bps: float, min_profit_bps: float,
+                  stop_loss_pct: float, time_stop_min: int,
+                  age_min: float = 0.0,
+                  min_pos_usdt: float = 1.0):
+    notional = (qty or 0.0) * price
+    is_dust = not avg_entry or qty <= 0 or notional < min_pos_usdt
+    breakeven = None
+    if avg_entry and qty > 0:
+        breakeven = avg_entry * (1.0 + (2.0*fee_bps + min_profit_bps) / 10000.0)
+    stop_ok = False
+    if avg_entry and qty > 0:
+        stop_ok = (price <= avg_entry * (1.0 - abs(stop_loss_pct))) or (age_min >= time_stop_min)
+    upnl_pct = (price / avg_entry - 1.0) if (avg_entry or 0) > 0 else 0.0
+
+    if is_dust:
+        qty = None
+
+    return {
+        "qty": float(qty or 0.0),
+        "avg_entry": None if is_dust else float(avg_entry),
+        "breakeven_px": None if (is_dust or not breakeven) else float(breakeven),
+        "unrealized_pct": float(upnl_pct),
+        "in_position_min": int(age_min),
+        "stop_ok": bool(stop_ok),
+        # trailing-related fields (optional, zero by default here)
+        "profit_protect_armed": True,
+        "peak_upnl_pct": 0.0,
+        "drawdown_from_peak_pct": 0.0,
+    }
+
 async def run_symbol(sym: str):
     client = MexcClient(
         base_url=CFG["exchange"]["base_url"],
@@ -103,18 +134,22 @@ async def run_symbol(sym: str):
                 is_dust = notional_cur < 1.0 or (pos_qty or 0.0) <= 0 or not avg_entry
 
                 # Set avg_entry and breakeven_px to None if position value has less then 1 USDT
-                pos_ctx = {
-                    "qty": float(pos_qty or 0.0),
-                    "avg_entry": None if is_dust else float(avg_entry),
-                    "breakeven_px": None if (is_dust or not breakeven_px) else float(breakeven_px),
-                    "unrealized_pct": float(upnl_pct),
-                    "in_position_min": int(age_min),
-                    "stop_ok": bool(stop_ok)
-                }
+                pos_ctx = build_pos_ctx(
+                    price=px,
+                    qty=pos_qty,
+                    avg_entry=avg_entry,
+                    fee_bps=fee_bps,
+                    min_profit_bps=min_profit_bps,
+                    stop_loss_pct=stop_loss_pct,
+                    time_stop_min=float(time_stop_min),
+                    age_min=float(age_min),
+                    min_pos_usdt=float(CFG["execution"].get("min_notional_usd", 1.0))
+                )
 
                 # now call LLM with position context
+                trail_drawdown_pct=float(CFG["profit_protect"].get("trail_drawdown_pct", 0.01))
                 dca_step_bps = float(CFG["execution"].get("dca_step_bps", 20))
-                decision = await llm_decide(ollama_host, model, sym, feats, pos_ctx, dca_step_bps=dca_step_bps)
+                decision = await llm_decide(ollama_host, model, sym, feats, pos_ctx, dca_step_bps=dca_step_bps, trail_drawdown_pct=trail_drawdown_pct)
 
                 # 3) Heartbeat log ALWAYS
                 if decision.action == "HOLD":
@@ -125,8 +160,8 @@ async def run_symbol(sym: str):
                     action_emoji = "🟢"
                 else:
                     action_emoji = "❓"
-                logging.info("[%s] %s %s price=%.6f conf=%.2f last_ts=%s reason=%s",
-                             sym, action_emoji, decision.action, price, decision.confidence, last_ts, decision.reason)
+                logging.info("[%s] %s %s price=%.6f conf=%.2f last_ts=%s hint=%s reason=%s",
+                             sym, action_emoji, decision.action, price, decision.confidence, last_ts, decision.price_hint, decision.reason)
 
                 # 4) HOLD => sleep
                 if decision.action == "HOLD" or not allow_trade(decision.confidence, price, CFG, rs):

@@ -16,6 +16,12 @@ SYSTEM = (
   "No prose. No Markdown. No backticks."
 )
 
+SYSTEM = (
+  "You are a trading decision engine. OUTPUT STRICT JSON ONLY:\n"
+  '{"action":"BUY|SELL|HOLD","confidence":0.0-1.0,"price_hint":number|null,"reason":"short text"}\n'
+  "No prose. No Markdown. No backticks."
+)
+
 PROMPT_TEMPLATE = """Decide BUY/SELL/HOLD for {symbol}.
 
 Features (floats):
@@ -29,6 +35,16 @@ Hard rules:
   - Do NOT output BUY unless features.price <= position.avg_entry * (1 - {dca_step_bps}/10000).
   - Do NOT output SELL unless features.price >= position.breakeven_px, unless position.stop_ok is true.
 - If position.qty == 0 or position.avg_entry is null: BUY rule above does not apply.
+
+Pre-Decision overrides (apply BEFORE scoring):
+- If position.qty > 0:
+    - Let profitable = (position.qty > 0 AND features.price >= position.breakeven_px).
+    - If profitable AND position.profit_protect_armed == true AND position.drawdown_from_peak_pct >= {trail_drawdown_pct}:
+        -> action=SELL, confidence=0.65..0.85 (scale with drawdown), reason="trail drawdown"
+        -> SKIP remaining rules.
+    - If profitable AND NOT (ema_fast_above_slow==1 AND trend_15m>0 AND trend_1h>0 AND price_vs_vwap60>0):
+        -> action=SELL, confidence=0.60..0.80 (scale with profit and weakness), reason="take profit"
+        -> SKIP remaining rules.
 
 Scoring rubric (use signs and magnitudes, keep it simple):
 - Momentum (short): smom = 2*ret_1 + 1*ret_5 + 0.5*ret_20.
@@ -47,9 +63,9 @@ Scoring rubric (use signs and magnitudes, keep it simple):
 
 Edge = sum of above (including smom).
 
-Decision:
+Decision (only if no Pre-Decision override fired):
 - if Edge >= +0.25 and BUY rule is satisfied -> BUY
-- if Edge <= -0.25 -> SELL (respect SELL rule above)
+- if Edge <= -0.10 -> SELL
 - else -> HOLD
 
 Confidence (discrete; no 0.50):
@@ -99,7 +115,8 @@ async def llm_decide(
     symbol: str,
     features: Dict[str, Any],
     pos_ctx: Optional[Dict[str, Any]] = None,
-    dca_step_bps: float = 20.0
+    dca_step_bps: float = 20.0,
+    trail_drawdown_pct: float = 0.01
 ) -> Decision:
     position_json = json.dumps(pos_ctx or {
         "qty": 0.0, "avg_entry": None, "breakeven_px": None,
@@ -109,9 +126,10 @@ async def llm_decide(
         symbol=symbol,
         features_json=json.dumps(features),
         position_json=position_json,
-        dca_step_bps=dca_step_bps
+        dca_step_bps=dca_step_bps,
+        trail_drawdown_pct=trail_drawdown_pct
     )
-    payload = {"model": model, "prompt": prompt, "stream": False, "format": "json", "options": {"temperature": 0.2, "seed": 42}}
+    payload = {"model": model, "prompt": prompt, "stream": False, "format": "json", "options": {"temperature": 0.35, "top_p": 1, "top_k": 40, "seed": 42, "num_predict": 64, "repeat_penalty": 1.0, "num_ctx": 4096}}
 
     try:
         out = await _call_ollama(ollama_host, payload)
